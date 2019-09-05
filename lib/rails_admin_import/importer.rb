@@ -18,8 +18,8 @@ module RailsAdminImport
 
         if records.count > RailsAdminImport.config.line_item_limit
           return results = {
-            success: [],
-            error: [I18n.t('admin.import.import_error.line_item_limit', limit: RailsAdminImport.config.line_item_limit)]
+              success: [],
+              error: [I18n.t('admin.import.import_error.line_item_limit', limit: RailsAdminImport.config.line_item_limit)]
           }
         end
 
@@ -51,7 +51,7 @@ module RailsAdminImport
 
     def with_transaction(&block)
       if RailsAdminImport.config.rollback_on_error &&
-        defined?(ActiveRecord)
+          defined?(ActiveRecord)
 
         ActiveRecord::Base.transaction &block
       else
@@ -61,8 +61,8 @@ module RailsAdminImport
 
     def rollback_if_error
       if RailsAdminImport.config.rollback_on_error &&
-        defined?(ActiveRecord) &&
-        !results[:error].empty?
+          defined?(ActiveRecord) &&
+          !results[:error].empty?
 
         results[:success] = []
         raise ActiveRecord::Rollback
@@ -71,7 +71,6 @@ module RailsAdminImport
 
     def import_record(record)
       perform_model_callback(import_model.model, :before_import_find, record)
-
       if update_lookup && !(update_lookup - record.keys).empty?
         raise UpdateLookupError, I18n.t("admin.import.missing_update_lookup")
       end
@@ -104,8 +103,15 @@ module RailsAdminImport
 
     def update_lookup
       @update_lookup ||= if params[:update_if_exists] == "1"
-                           params[:update_lookup].map(&:to_sym)
+                           [update_column_hash[params[:update_lookup].to_sym]]
                          end
+    end
+
+    def update_column_hash
+      hsh = {}
+      return hsh if params[:csv_matching_column].blank? || params[:update_lookup].blank?
+      hsh[params[:update_lookup].to_sym] = "ra_#{params[:csv_matching_column].parameterize.underscore}".to_sym
+      hsh
     end
 
     attr_reader :results
@@ -154,7 +160,7 @@ module RailsAdminImport
       result_count = "#{array.size} #{import_model.display_name.pluralize(array.size)}"
       I18n.t("admin.flash.#{type}",
              name: result_count,
-               action: I18n.t("admin.actions.import.done"))
+             action: I18n.t("admin.actions.import.done"))
     end
 
     def perform_model_callback(object, method_name, record)
@@ -188,24 +194,23 @@ module RailsAdminImport
     def find_or_create_object(record, update)
       field_names = import_model.model_fields.map(&:name)
       new_attrs = record.select do |field_name, value|
-        field_names.include?(field_name) && !value.blank?
+        field_names.include?(update_column_hash.invert[field_name]) && !value.blank?
       end
 
       model = import_model.model
       object = if update.present?
                  query = update.each_with_object({}) do
-                   |field, query| query[field] = record[field]
+                 |field, query| query[update_column_hash.invert[field]] = record[field]
                  end
                  model.where(query).first
                end
-
       if object.nil?
         object = model.new
         perform_model_callback(object, :before_import_attributes, record)
         object.attributes = new_attrs
       else
         perform_model_callback(object, :before_import_attributes, record)
-        object.attributes = new_attrs.except(update.map(&:to_sym))
+        # object.attributes = new_attrs.except(update.map(&:to_sym))
       end
       object
     end
